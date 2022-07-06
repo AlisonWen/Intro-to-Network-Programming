@@ -1,2 +1,15 @@
 # Intro-to-Network-Programming
 NYCU Intro to Network Programming 2022 Fall
+
+### Installing docker on Mac m$1$
+
+https://docs.docker.com/desktop/mac/apple-silicon/
+
+After installation, typing `docker` in terminal is still not available since the command wasn't added to `$PATH`, thus run the following two commands on terminal.
+
+```bash
+# Add Visual Studio Code (code)
+export PATH="$PATH:/Applications/Visual Studio Code.app/Contents/Resources/app/bin"
+# Add Docker Desktop for Mac (docker)
+export PATH="$PATH:/Applications/Docker.app/Contents/Resources/bin/"
+```
