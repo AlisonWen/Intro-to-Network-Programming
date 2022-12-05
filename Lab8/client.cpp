@@ -74,12 +74,15 @@ static unsigned cnt = 0;
 
 // Driver code
 int main(int argc, char *argv[]){
-	cout << argc << endl;
     if(argc < 3) { // not enough parameters
 		return -fprintf(stderr, "usage: %s ... <port> <ip>\n", argv[0]);
 	}
 
     srand(time(0) ^ getpid());
+
+	setvbuf(stdin, NULL, _IONBF, 0);
+	setvbuf(stderr, NULL, _IONBF, 0);
+	setvbuf(stdout, NULL, _IONBF, 0);
 
 	memset(&servin, 0, sizeof(servin));
 	servin.sin_family = AF_INET;
@@ -100,37 +103,53 @@ int main(int argc, char *argv[]){
 	int seq_num = 0;
 	if(d){
 		while ((dir = readdir(d)) != NULL){
+			
+			//skip the directory "."
+			if (!strcmp (dir->d_name, "."))
+            	continue;
+			if (!strcmp (dir->d_name, ".."))    
+				continue;
+			
 			if(cnt == num_file) break;
 			cnt++;
-			cout << "cnt = " << cnt << endl;
 			
-			cout << "file name = " << dir->d_name << endl;
+			//cout << "cnt = " << cnt << endl;
+			//cout << "file name = " << dir->d_name << endl;
+
 			string path = string(argv[1]) + "/" + string(dir->d_name);
 			FILE *fp = fopen(path.c_str(), "r");
-			cout << &fp << endl;
+			//cout << &fp << endl;
+
 			bzero(buf, sizeof(buf));
 			if(fp){
-				std::cout << "Reading file contents\n";
-				cout << "seek end = " << fseek(fp, 0, SEEK_END) << endl;
+				cout << "Reading file contents\n";
+				fseek(fp, 0, SEEK_END);
 				size_t file_size = ftell(fp);
-				cout << "file size = " << file_size << endl;
-				cout << "seek set = " << fseek(fp, 0, SEEK_SET) << endl;
+				//cout << "file size = " << file_size << endl;
+				fseek(fp, 0, SEEK_SET);
 				if(fread(buf, file_size, 1, fp) <= 0){
-					std::cout << "Unable to copy file into buffer or empty file\n";
+					cout << "Unable to copy file into buffer or empty file\n";
 					exit(1);
 				}else{
 
 					string msg = "<" + to_string(seq_num) + " " + to_string(checksum(string(buf))) + " " + string(dir->d_name) + " >" + string(buf);
-					
 					char ackbuf[1024];
 					
 					for(int num = 0; num < 10; num++){ // 最多送 10 次避免卡住
 						bzero(ackbuf, sizeof(ackbuf));
 						pair<int, string> packet;
 						if(seq_num == packet.first && packet.second == "ACK") break;
-						cout << "sending " <<sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin)) << endl;
+						sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin));
 						socklen_t servinlen = sizeof(servin);
-						recvfrom(sockfd, ackbuf, sizeof(ackbuf), 0, (struct sockaddr *)&servin, &servinlen);
+						
+						//receive msg from server
+						recvfrom(sockfd, ackbuf, sizeof(ackbuf), MSG_DONTWAIT, (struct sockaddr *)&servin, &servinlen);
+						//compare if the ack is right 
+						string ack_ans = "<" + to_string(seq_num) + " 0>ACK";
+						if(ack_ans == string(ackbuf)){
+							cout<<"file " << seq_num << " received!\n";
+							break;
+						}
 						cout << "num = " << num << endl;
 					}
 					
@@ -146,15 +165,6 @@ int main(int argc, char *argv[]){
 		
 	}
 
-	// request to send datagram
-	// no need to specify server address in sendto
-	// connect stores the peers IP and port
-	// sendto(sockfd, buf, MAXLINE, 0, (struct sockaddr*)NULL, sizeof(servaddr));
-	
-	// waiting for response
-	
-
 	// close the descriptor
 	close(sockfd);
 }
-
