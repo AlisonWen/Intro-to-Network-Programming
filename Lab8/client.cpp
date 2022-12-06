@@ -15,7 +15,6 @@
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
-#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -23,23 +22,28 @@
 #include <dirent.h>
 #include <vector>
 #include <unordered_map>
+#include <sys/types.h> 
+#include <ctime>
+#include <map>
 
 #define PORT 5000
 #define MAXLINE 1000
 using namespace std;
+using pii = pair<int, int>;
 char buf[10000000];
 
+map <pii, int> ACKed;
 
-pair<int, string> decompose(string content){ // decompose a packet into 1.seq num, 2.checksum, 3.content(string)
-	content.erase(content.begin()); // erase '<'
-	string seq_str = "";
-	for(int i = 0; i < content.size() && content[i] != ' ';){
-		seq_str.push_back(content[i]);
-	}
-	int seq_num = strtol(seq_str.c_str(), nullptr, 10);
-	auto start = content.find('>');
-	string ack = content.substr(start, content.size() - start);
-	return make_pair(seq_num, ack);
+
+
+
+pair<pii, string> decompose(string content){ // decompose a packet into 1.seq num, 2.checksum, 3.content(string)
+	stringstream ss;
+	string buf;
+	int seq, offset;
+	ss << content;
+	ss >> seq >> offset >> buf;
+	return {{seq, offset}, buf};
 }
 
 uint64_t checksum(string content){
@@ -77,7 +81,7 @@ int main(int argc, char *argv[]){
     if(argc < 3) { // not enough parameters
 		return -fprintf(stderr, "usage: %s ... <port> <ip>\n", argv[0]);
 	}
-
+	
     srand(time(0) ^ getpid());
 
 	setvbuf(stdin, NULL, _IONBF, 0);
@@ -119,40 +123,63 @@ int main(int argc, char *argv[]){
 			string path = string(argv[1]) + "/" + string(dir->d_name);
 			FILE *fp = fopen(path.c_str(), "r");
 			//cout << &fp << endl;
-
+			// sleep(2);
 			bzero(buf, sizeof(buf));
 			if(fp){
-				cout << "Reading file contents\n";
+				cout << "Reading file " << seq_num << " contents\n";
 				fseek(fp, 0, SEEK_END);
 				size_t file_size = ftell(fp);
 				//cout << "file size = " << file_size << endl;
 				fseek(fp, 0, SEEK_SET);
-				if(fread(buf, file_size, 1, fp) <= 0){
-					cout << "Unable to copy file into buffer or empty file\n";
-					exit(1);
+				vector <string> content;
+				if(file_size < 1000){
+					fread(buf, file_size, 1, fp);
+					content.emplace_back(string(buf));
 				}else{
-
-					string msg = "<" + to_string(seq_num) + " " + to_string(checksum(string(buf))) + " " + string(dir->d_name) + " >" + string(buf);
-					char ackbuf[1024];
+					int n = file_size / 1000;
+					char content_buf[1024];
+					for(int i = 0; i < n; i++){
+						bzero(content_buf, sizeof(content_buf));
+						fread(content_buf, 1000, 1, fp);
+						content.emplace_back(string(content_buf));
+					}
+					if(file_size % 1000) {
+						bzero(content_buf, sizeof(content_buf));
+						fread(content_buf, file_size - 1000 * n, 1, fp);
+						content.emplace_back(string(content_buf));
+					}
+				}
+				
+				//cout << "content size = " << content.size() << endl;
+				//for(auto i : content) cout << i << endl;
+				// string msg = "<" + to_string(seq_num) + " " + to_string(checksum(string(buf))) + " " + string(dir->d_name) + " >" + string(buf);
+				char ackbuf[1024];
+				
+				//for(int num = 0; num < 100; num++){ // 最多送 10 次避免卡住
 					
-					for(int num = 0; num < 10; num++){ // 最多送 10 次避免卡住
+				pair<pii, string> packet = {{-1, -1}, ""};
+				for(int offset = 0; offset < content.size(); offset++){
+					packet = {{-1, -1}, ""};
+					//cout<<seq_num<<" "<<offset<<endl;
+					if(ACKed[{seq_num, offset}]) continue;
+					string msg = "<" + to_string(seq_num) + " " + to_string(content.size()) + " " + to_string(offset) + " " + to_string(checksum(string(content[offset]))) + " " + string(dir->d_name) + " >" + string(content[offset]);
+					//cout << "msg = " << msg << endl;
+					for(int num = 0; num < 10; num++){
+						packet = {{-1, -1}, ""};
 						bzero(ackbuf, sizeof(ackbuf));
-						pair<int, string> packet;
-						if(seq_num == packet.first && packet.second == "ACK") break;
-						sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin));
+						int rlen = sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin));
+						//cout << "sending the msg " << rlen << endl;
+						usleep(500);
 						socklen_t servinlen = sizeof(servin);
-						
-						//receive msg from server
-						recvfrom(sockfd, ackbuf, sizeof(ackbuf), MSG_DONTWAIT, (struct sockaddr *)&servin, &servinlen);
-						//compare if the ack is right 
-						string ack_ans = "<" + to_string(seq_num) + " 0>ACK";
-						if(ack_ans == string(ackbuf)){
-							cout<<"file " << seq_num << " received!\n";
+						recvfrom(sockfd, ackbuf, 1024, MSG_DONTWAIT, (struct sockaddr*)&servin, &servinlen);
+						//cout << "ack buf = " << string(ackbuf) << endl;
+						packet = decompose(string(ackbuf));
+						if(packet.first.first == seq_num && packet.first.second == offset && packet.second == "ACK") {
+							ACKed[{seq_num, offset}] = 1;
+							//cout << "ACK received!" << endl;
 							break;
 						}
-						cout << "num = " << num << endl;
 					}
-					
 				}
 			}else{
 				std::cout << "Cannot open file\n";
