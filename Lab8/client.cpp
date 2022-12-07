@@ -1,28 +1,22 @@
-// udp client driver program
-// #include <bits/stdc++.h>
 #include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
 #include <sys/types.h>
-#include <arpa/inet.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <sys/time.h>
 #include <cstring>
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <filesystem>
 #include <dirent.h>
 #include <vector>
-#include <unordered_map>
-#include <sys/types.h> 
+#include <unordered_map> 
 #include <ctime>
 #include <map>
 
@@ -34,8 +28,6 @@ char buf[10000000];
 
 map <pii, int> ACKed;
 map <pii, string> send_failed;
-
-
 
 pair<pii, string> decompose(string content){ // decompose a packet into 1.seq num, 2.checksum, 3.content(string)
 	stringstream ss;
@@ -56,7 +48,6 @@ int main(int argc, char *argv[]){
     if(argc < 3) { // not enough parameters
 		return -fprintf(stderr, "usage: %s ... <port> <ip>\n", argv[0]);
 	}
-	//cout << "debug\n";
     srand(time(0) ^ getpid());
 
 	memset(&servin, 0, sizeof(servin));
@@ -88,18 +79,13 @@ int main(int argc, char *argv[]){
 			if(cnt == num_file) break;
 			cnt++;
 			
-			//cout << "cnt = " << cnt << endl;
-			//cout << "file name = " << dir->d_name << endl;
-
 			string path = string(argv[1]) + "/" + string(dir->d_name); //cout << "path = " << path << endl;
 			FILE *fp = fopen(path.c_str(), "r");
 			bzero(buf, sizeof(buf));
 
 			if(fp){
-				// cout << "Reading file " << seq_num << " contents\n";
 				fseek(fp, 0, SEEK_END);
 				size_t file_size = ftell(fp);
-				//cout << "file size = " << file_size << endl;
 				fseek(fp, 0, SEEK_SET);
 				vector <string> content;
 				if(file_size < 1000){
@@ -120,35 +106,26 @@ int main(int argc, char *argv[]){
 					}
 				}
 				
-				//cout << "content size = " << content.size() << endl;
-				//for(auto i : content) cout << i << endl;
-				// string msg = "<" + to_string(seq_num) + " " + to_string(checksum(string(buf))) + " " + string(dir->d_name) + " >" + string(buf);
 				char ackbuf[1024];
-				
-					
 				pair<pii, string> packet = {{-1, -1}, ""};
+
 				for(int offset = 0; offset < content.size(); offset++){
 					packet = {{-1, -1}, ""};
-					//cout<<seq_num<<" "<<offset<<endl;
 					if(ACKed[{seq_num, offset}]) continue;
-					//string header = "<" + to_string(seq_num) + " " + to_string(content.size()) + " " + to_string(offset) + " " + to_string(content[offset].size()) + " " + string(dir->d_name) + " >";
-					//cout << header << endl;
 					string msg = "<" + to_string(seq_num) + " " + to_string(content.size()) + " " + to_string(offset) + " " + to_string(content[offset].size()) + " " + string(dir->d_name) + " >" + string(content[offset]);
-					//cout << "msg = " << msg << endl;
-					for(int num = 0; num < 75; num++){
+					//for(int num = 0; num < 40; num++){
 						packet = {{-1, -1}, ""};
 						bzero(ackbuf, sizeof(ackbuf));
 						int rlen = sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin));
-						usleep(100);
+						usleep(2000);
 						socklen_t servinlen = sizeof(servin);
 						recvfrom(sockfd, ackbuf, 1024, MSG_DONTWAIT, (struct sockaddr*)&servin, &servinlen);
 						packet = decompose(string(ackbuf));
 						if(packet.first.first == seq_num && packet.first.second == offset && packet.second == "ACK") {
 							ACKed[{seq_num, offset}] = 1;
-							//cout << "ACK received!" << endl;
 							break;
 						}
-					}
+					//}
 					if(ACKed.find({seq_num, offset}) == ACKed.end()){
 						send_failed[{seq_num, offset}] = msg;
 					}
@@ -161,32 +138,25 @@ int main(int argc, char *argv[]){
 			seq_num++;
 			if(cnt == num_file) break;
 		}
-		//cout << "left files = " << send_failed.size() << endl;
-		while (!send_failed.empty()){ cout << "left size = " << send_failed.size() << endl;
+		while (!send_failed.empty()){ //cout << "left size = " << send_failed.size() << endl;
 			for(auto &f : send_failed){
 				string msg = f.second;
 				int rlen = sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin));
-				usleep(100);
+				usleep(1000);
 				char ackbuf[1024];
 				bzero(ackbuf, sizeof(ackbuf));
 				socklen_t servinlen = sizeof(servin);
 				recvfrom(sockfd, ackbuf, 1024, MSG_DONTWAIT, (struct sockaddr*)&servin, &servinlen);
-				//cout << "ack buf = " << string(ackbuf) << endl;
 				pair<pii, string> packet = decompose(string(ackbuf));
 
 				if(packet.second == "ACK") {
 					ACKed[{packet.first}] = 1;
-					//cout << "ACK received!" << endl;
 					send_failed.erase(f.first);
 				}
 			}	
 		}
-		string msg = "end sending";
-		sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin));
-		
-		sleep(1);
+		sleep(10);
 	}
-
 	// close the descriptor
 	close(sockfd);
 }
