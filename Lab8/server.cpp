@@ -32,6 +32,7 @@ struct Packet{
     int num_off;
     int offset;
     int checksum;
+    int frag_size;
     string f_name;
 };
 
@@ -62,10 +63,10 @@ Packet decompose(string content){ // decompose a packet
     int seq_num = 0;
     int num_packet;
     int off;
-    int _check;
+    int _frag_size;
 	stringstream ss;
     ss << content;
-    ss >> seq_num >> num_packet >> off >> _check >> fileName;
+    ss >> seq_num >> num_packet >> off >> _frag_size >> fileName;
 	auto start = content.find('>');
 	string fcnt = content.substr(start + 1, content.size() - start);
     
@@ -82,32 +83,11 @@ Packet decompose(string content){ // decompose a packet
     packet.seq_idx = seq_num;
     packet.num_off = num_packet;
     packet.offset = off;
-    packet.checksum = _check;
+    //packet.checksum = _check;
+    packet.frag_size = _frag_size;
     packet.f_name = fileName;
 
 	return packet;
-}
-
-bool checksum(const char content[], int _check){
-    vector <uint64_t> data;
-	uint64_t cur = 0;
-	char tmp[8];
-	for(int i = 0; i < strlen(content) / 8; i++){
-		for(int j = i * 8; j <(i + 1) * 8; j++) tmp[j % 8] = content[j];
-		sscanf(tmp, "%ld", &cur);
-		data.emplace_back(cur);
-	}
-	if(strlen(content) % 8){
-		for(int i = ((int)(strlen(content) / 8)) * 8; i < strlen(content); i++) tmp[i % 8] = content[i];
-		sscanf(tmp, "%ld", &cur);
-		data.emplace_back(cur);
-	}
-	uint64_t ans = data[0];
-	for(int i = 1; i < data.size(); i++){
-		ans ^= data[i];
-	}
-	if(ans == (uint64_t)_check) return true;
-    return false;
 }
 
 int main(int argc, char *argv[]) {
@@ -154,14 +134,9 @@ int main(int argc, char *argv[]) {
         //printf("received = %s\n", fileBuf);
         Packet packet = decompose(string(fileBuf));
 
-        // if(checkIsExist(packet.seq_idx, packet.offset)){ // return ack and continue
-        //     string ack_msg = to_string(packet.seq_idx) + " " + to_string(packet.offset) + " ACK";
-        //     sendto(s, ack_msg.c_str(), ack_msg.length(), 0, (struct sockaddr *)&csin, csinlen); 
-        //     continue;
-        // }
 
         string f_cnt = fcnt_list[packet.seq_idx][packet.offset];
-        if(!checksum(f_cnt.c_str(), packet.checksum)){   //checksum 不對
+        if(f_cnt.size() != packet.frag_size){   //checksum 不對
             //printf("not right checksum!\n");
             char trash[] = "nono";
             sendto(s, trash, strlen(trash), 0, (struct sockaddr *)&csin, csinlen); 
@@ -189,7 +164,7 @@ int main(int argc, char *argv[]) {
             fp = fopen(f_path.c_str(), "w");
             if(fp){
                 fwrite(cnt.c_str(), cnt.size(), 1, fp);
-                printf("File received successfully.\n");
+                printf("%s File received successfully.\n", packet.f_name.c_str());
             }
             else{
                 printf("Cannot create to output file.\n");
