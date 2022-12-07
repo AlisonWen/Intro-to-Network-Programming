@@ -33,7 +33,7 @@ using pii = pair<int, int>;
 char buf[10000000];
 
 map <pii, int> ACKed;
-
+map <pii, string> send_failed;
 
 
 
@@ -46,31 +46,6 @@ pair<pii, string> decompose(string content){ // decompose a packet into 1.seq nu
 	return {{seq, offset}, buf};
 }
 
-uint64_t checksum(string content){
-	vector <uint64_t> data;
-	uint64_t cur = 0;
-	char tmp[8];
-	for(int i = 0; i < content.size() / 8; i++){
-		for(int j = i * 8; j <(i + 1) * 8; j++) tmp[j % 8] = content[j];
-		sscanf(tmp, "%ld", &cur);
-		data.emplace_back(cur);
-	}
-	if(content.size() % 8){
-		for(int i = ((int)(content.size() / 8)) * 8; i < content.size(); i++) tmp[i % 8] = content[i];
-		sscanf(tmp, "%ld", &cur);
-		data.emplace_back(cur);
-	}
-	uint64_t ans = data[0];
-	for(int i = 1; i < data.size(); i++){
-		ans ^= data[i];
-	}
-	return ans;
-}
-
-double tv2ms(struct timeval *tv) {
-	return 1000.0*tv->tv_sec + 0.001*tv->tv_usec;
-}
-
 static int sockfd = -1;
 static struct sockaddr_in servin;
 static unsigned seq;
@@ -81,12 +56,8 @@ int main(int argc, char *argv[]){
     if(argc < 3) { // not enough parameters
 		return -fprintf(stderr, "usage: %s ... <port> <ip>\n", argv[0]);
 	}
-	
+	//cout << "debug\n";
     srand(time(0) ^ getpid());
-
-	setvbuf(stdin, NULL, _IONBF, 0);
-	setvbuf(stderr, NULL, _IONBF, 0);
-	setvbuf(stdout, NULL, _IONBF, 0);
 
 	memset(&servin, 0, sizeof(servin));
 	servin.sin_family = AF_INET;
@@ -107,12 +78,12 @@ int main(int argc, char *argv[]){
 	int seq_num = 0;
 	if(d){
 		while ((dir = readdir(d)) != NULL){
-			
 			//skip the directory "."
 			if (!strcmp (dir->d_name, "."))
             	continue;
 			if (!strcmp (dir->d_name, ".."))    
 				continue;
+			if (dir->d_name[0] == '.') continue;
 			
 			if(cnt == num_file) break;
 			cnt++;
@@ -120,13 +91,12 @@ int main(int argc, char *argv[]){
 			//cout << "cnt = " << cnt << endl;
 			//cout << "file name = " << dir->d_name << endl;
 
-			string path = string(argv[1]) + "/" + string(dir->d_name);
+			string path = string(argv[1]) + "/" + string(dir->d_name); //cout << "path = " << path << endl;
 			FILE *fp = fopen(path.c_str(), "r");
-			//cout << &fp << endl;
-			// sleep(2);
 			bzero(buf, sizeof(buf));
+
 			if(fp){
-				cout << "Reading file " << seq_num << " contents\n";
+				// cout << "Reading file " << seq_num << " contents\n";
 				fseek(fp, 0, SEEK_END);
 				size_t file_size = ftell(fp);
 				//cout << "file size = " << file_size << endl;
@@ -145,7 +115,7 @@ int main(int argc, char *argv[]){
 					}
 					if(file_size % 1000) {
 						bzero(content_buf, sizeof(content_buf));
-						fread(content_buf, file_size - 1000 * n, 1, fp);
+						fread(content_buf, file_size - (1000 * n), 1, fp);
 						content.emplace_back(string(content_buf));
 					}
 				}
@@ -155,30 +125,32 @@ int main(int argc, char *argv[]){
 				// string msg = "<" + to_string(seq_num) + " " + to_string(checksum(string(buf))) + " " + string(dir->d_name) + " >" + string(buf);
 				char ackbuf[1024];
 				
-				//for(int num = 0; num < 100; num++){ // 最多送 10 次避免卡住
 					
 				pair<pii, string> packet = {{-1, -1}, ""};
 				for(int offset = 0; offset < content.size(); offset++){
 					packet = {{-1, -1}, ""};
 					//cout<<seq_num<<" "<<offset<<endl;
 					if(ACKed[{seq_num, offset}]) continue;
-					string msg = "<" + to_string(seq_num) + " " + to_string(content.size()) + " " + to_string(offset) + " " + to_string(checksum(string(content[offset]))) + " " + string(dir->d_name) + " >" + string(content[offset]);
+					//string header = "<" + to_string(seq_num) + " " + to_string(content.size()) + " " + to_string(offset) + " " + to_string(content[offset].size()) + " " + string(dir->d_name) + " >";
+					//cout << header << endl;
+					string msg = "<" + to_string(seq_num) + " " + to_string(content.size()) + " " + to_string(offset) + " " + to_string(content[offset].size()) + " " + string(dir->d_name) + " >" + string(content[offset]);
 					//cout << "msg = " << msg << endl;
-					for(int num = 0; num < 10; num++){
+					for(int num = 0; num < 75; num++){
 						packet = {{-1, -1}, ""};
 						bzero(ackbuf, sizeof(ackbuf));
 						int rlen = sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin));
-						//cout << "sending the msg " << rlen << endl;
-						usleep(500);
+						usleep(100);
 						socklen_t servinlen = sizeof(servin);
 						recvfrom(sockfd, ackbuf, 1024, MSG_DONTWAIT, (struct sockaddr*)&servin, &servinlen);
-						//cout << "ack buf = " << string(ackbuf) << endl;
 						packet = decompose(string(ackbuf));
 						if(packet.first.first == seq_num && packet.first.second == offset && packet.second == "ACK") {
 							ACKed[{seq_num, offset}] = 1;
 							//cout << "ACK received!" << endl;
 							break;
 						}
+					}
+					if(ACKed.find({seq_num, offset}) == ACKed.end()){
+						send_failed[{seq_num, offset}] = msg;
 					}
 				}
 			}else{
@@ -189,7 +161,30 @@ int main(int argc, char *argv[]){
 			seq_num++;
 			if(cnt == num_file) break;
 		}
+		//cout << "left files = " << send_failed.size() << endl;
+		while (!send_failed.empty()){ cout << "left size = " << send_failed.size() << endl;
+			for(auto &f : send_failed){
+				string msg = f.second;
+				int rlen = sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin));
+				usleep(100);
+				char ackbuf[1024];
+				bzero(ackbuf, sizeof(ackbuf));
+				socklen_t servinlen = sizeof(servin);
+				recvfrom(sockfd, ackbuf, 1024, MSG_DONTWAIT, (struct sockaddr*)&servin, &servinlen);
+				//cout << "ack buf = " << string(ackbuf) << endl;
+				pair<pii, string> packet = decompose(string(ackbuf));
+
+				if(packet.second == "ACK") {
+					ACKed[{packet.first}] = 1;
+					//cout << "ACK received!" << endl;
+					send_failed.erase(f.first);
+				}
+			}	
+		}
+		string msg = "end sending";
+		sendto(sockfd, msg.c_str(), msg.length(), 0, (struct sockaddr*)&servin, sizeof(servin));
 		
+		sleep(1);
 	}
 
 	// close the descriptor
