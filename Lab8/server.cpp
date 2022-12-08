@@ -172,6 +172,11 @@ int main(int argc, char *argv[]) {
             fclose(fp);
         }
     }
-
+    char term_msg[25] = "-1 -1 terminate";
+    //cout << term_msg << endl;
+    printf("%s", term_msg);
+    while (true){
+        sendto(s, term_msg, strlen(term_msg), 0, (struct sockaddr *)&csin, csinlen); 
+    }
 	close(s);
 }
